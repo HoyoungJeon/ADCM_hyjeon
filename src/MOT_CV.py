@@ -57,13 +57,6 @@ class MultiObjectTracker:
     - Confirmed tracks are removed if unmatched for > max_skipped frames.
     Detection format: [x, y]
     """
-    # def __init__(self, max_skipped=5, dist_threshold=50.0, init_frames=1):
-    """
-    Multi-object tracker with confirmation logic:
-    - Detections must persist for 'init_frames' before track creation.
-    - Confirmed tracks are removed if unmatched for > max_skipped frames.
-    Detection format: [x, y]
-    """
     def __init__(self, max_skipped=5, dist_threshold=50.0, init_frames=3):
         self.tracks = []
         self.next_id = 0
@@ -80,6 +73,7 @@ class MultiObjectTracker:
         cost = np.zeros((N, M))
         for i, trk in enumerate(self.tracks):
             pred = trk.predict()
+
             for j, det in enumerate(detections):
                 cost[i, j] = np.linalg.norm(pred[:2] - det)
         row, col = linear_sum_assignment(cost)
@@ -99,17 +93,16 @@ class MultiObjectTracker:
         matched, unmatched_dets, unmatched_trks = self.associate(detections)
         for trk_idx, det_idx in matched:
             self.tracks[trk_idx].update(detections[det_idx])
+
         # Increment skip for unmatched confirmed tracks
         for idx in unmatched_trks:
             self.tracks[idx].skipped_frames += 1
         # Remove stale confirmed tracks
         self.tracks = [t for t in self.tracks if t.skipped_frames <= self.max_skipped]
 
-                # Pending detection logic
+        # Pending detection logic
         new_pending = []
-        # Update pending counts: match by distance threshold
         for pen in self.pending:
-            # find detection within distance threshold of pending detection
             matched_det = None
             for d in detections:
                 if np.linalg.norm(np.array(d) - np.array(pen['detection'])) <= self.dist_threshold:
@@ -117,13 +110,11 @@ class MultiObjectTracker:
                     break
             if matched_det is not None:
                 pen['count'] += 1
-                # promote to confirmed track when count reaches init_frames
                 if pen['count'] >= self.init_frames:
                     self.tracks.append(Track(pen['detection'], self.next_id))
                     self.next_id += 1
                 else:
                     new_pending.append(pen)
-        # Add new pending for unmatched detections
         for idx in unmatched_dets:
             new_pending.append({'detection': detections[idx], 'count': 1})
         self.pending = new_pending
@@ -136,8 +127,8 @@ class MultiObjectTracker:
                 'id': t.track_id,
                 'x': float(s[0]),
                 'y': float(s[1]),
-                'vx': float(s[2]),
-                'vy': float(s[3])
+                'vx': float(s[2]),   # 속도 x
+                'vy': float(s[3])    # 속도 y
             })
         return out
 
@@ -157,7 +148,9 @@ def main():
         tracks = tracker.get_tracks()
         print("Tracked states:")
         for tr in tracks:
-            print(f"  Track {tr['id']}: x={tr['x']:.2f}, y={tr['y']:.2f}")
+            print(f"  Track {tr['id']}: "
+                  f"x={tr['x']:.2f}, y={tr['y']:.2f}, "
+                  f"vx={tr['vx']:.2f}, vy={tr['vy']:.2f}")
         print()
 
 if __name__ == '__main__':
