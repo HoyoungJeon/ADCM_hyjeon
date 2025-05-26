@@ -1,9 +1,5 @@
 import numpy as np
 
-"""
-Four 6D Kalman Filter variants using only position measurements (px, py) to estimate
-state [px, py, vx, vy, ax, ay].
-"""
 
 class KalmanFilterCV6:
     """Constant Velocity: ax=ay=0"""
@@ -147,28 +143,3 @@ class ExtendedKalmanFilterCTRA6:
         self.x = self.x + K @ y
         self.P = (np.eye(6) - K @ self.H) @ self.P
         return self.x.copy()
-
-# Example usage:
-if __name__ == '__main__':
-    meas = [[0,0], [1,1], [2,2], [3,3]]
-    # Instantiate all four filters
-    filters = {
-        'CV6': KalmanFilterCV6(dt=1.0),
-        'CA6': KalmanFilterCA6(dt=1.0),
-        'CTRV6': ExtendedKalmanFilterCTRV6(dt=1.0),
-        'CTRA6': ExtendedKalmanFilterCTRA6(dt=1.0)
-    }
-    # Process measurements
-    for name, kf in filters.items():
-        print(f"--- {name} ---")
-        for z in meas:
-            pred = kf.predict()
-            state = kf.update(z)
-            px, py, vx, vy, ax, ay = state.flatten()
-            print(
-                f"{name} state: "
-                f"px={px:.2f}, py={py:.2f}, "
-                f"vx={vx:.2f}, vy={vy:.2f}, "
-                f"ax={ax:.2f}, ay={ay:.2f}"
-            )
-        print()

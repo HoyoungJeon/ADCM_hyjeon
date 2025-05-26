@@ -57,7 +57,7 @@ class MultiObjectTracker:
     - Confirmed tracks are removed if unmatched for > max_skipped frames.
     Detection format: [x, y]
     """
-    def __init__(self, max_skipped=5, dist_threshold=50.0, init_frames=3):
+    def __init__(self, max_skipped=5, dist_threshold=10.0, init_frames=3):
         self.tracks = []
         self.next_id = 0
         self.max_skipped = max_skipped
@@ -100,25 +100,30 @@ class MultiObjectTracker:
         # Remove stale confirmed tracks
         self.tracks = [t for t in self.tracks if t.skipped_frames <= self.max_skipped]
 
-        # Pending detection logic
-        new_pending = []
-        for pen in self.pending:
-            matched_det = None
-            for d in detections:
-                if np.linalg.norm(np.array(d) - np.array(pen['detection'])) <= self.dist_threshold:
-                    matched_det = d
-                    break
-            if matched_det is not None:
-                pen['count'] += 1
-                if pen['count'] >= self.init_frames:
-                    self.tracks.append(Track(pen['detection'], self.next_id))
-                    self.next_id += 1
-                else:
-                    new_pending.append(pen)
-        for idx in unmatched_dets:
-            new_pending.append({'detection': detections[idx], 'count': 1})
-        self.pending = new_pending
-
+        # === UPDATED LOGIC START ===
+        # Only initialize pending tracks before the first tracks are created
+        if len(self.tracks) == 0:
+            new_pending = []
+            for pen in self.pending:
+                matched_det = None
+                for d in detections:
+                    if np.linalg.norm(np.array(d) - np.array(pen['detection'])) <= self.dist_threshold:
+                        matched_det = d
+                        break
+                if matched_det is not None:
+                    pen['count'] += 1
+                    if pen['count'] >= self.init_frames:
+                        self.tracks.append(Track(pen['detection'], self.next_id))  # CHANGED: create track once
+                        self.next_id += 1
+                    else:
+                        new_pending.append(pen)
+            for idx in unmatched_dets:
+                new_pending.append({'detection': detections[idx], 'count': 1})
+            self.pending = new_pending
+        else:
+            # CHANGED: Clear pending to prevent further track creation
+            self.pending = []
+        # === UPDATED LOGIC END ===
     def get_tracks(self):
         out = []
         for t in self.tracks:
@@ -136,12 +141,18 @@ class MultiObjectTracker:
 def main():
     tracker = MultiObjectTracker()
     frames = [
-        [[10,10], [20,15], [30,20]],
-        [[11,10.5], [21,15.2], [30,20.3]],
-        [[12,11],   [21.5,15.4]],
-        [[13,11.5], [22,15.6]],
-        [[14,12]]
+        [[10.0, 10.0], [20.0, 15.0], [30.0, 20.0]],
+        [[11.0, 10.5], [21.0, 15.5], [31.0, 20.5]],
+        [[12.0, 11.0], [22.0, 16.0], [32.0, 21.0]],
+        [[13.0, 11.5], [23.0, 16.5], [33.0, 21.5]],
+        [[14.0, 12.0], [24.0, 17.0], [34.0, 22.0]],
+        [[15.0, 12.5], [25.0, 17.5], [35.0, 22.5]],
+        [[16.0, 13.0], [26.0, 18.0], [36.0, 23.0]],
+        [[17.0, 13.5], [27.0, 18.5], [37.0, 23.5]],
+        [[18.0, 14.0], [28.0, 19.0], [38.0, 24.0]],
+        [[19.0, 14.5], [29.0, 19.5], [39.0, 24.5]],
     ]
+
     for frame_idx, dets in enumerate(frames):
         print(f"Frame {frame_idx} detections: {dets}")
         tracker.update(dets)
