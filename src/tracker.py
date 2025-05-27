@@ -38,6 +38,7 @@ class Track:
 
         self.history = [detection]
         self.dt = dt
+        self._init_ctrv = False
 
     def predict(self):
         self.kf.predict()
@@ -54,25 +55,18 @@ class Track:
         # 1) 히스토리 추가
         self.history.append(detection)
 
-        # 2) 세 점 이상 쌓이면 yaw, yaw_rate 계산하여 초기화
-        if len(self.history) >= 3:
-            x0, y0 = self.history[-3]
-            x1, y1 = self.history[-2]
-            x2, y2 = self.history[-1]
-            yaw_prev = np.arctan2(y1 - y0, x1 - x0)
-            yaw_curr = np.arctan2(y2 - y1, x2 - x1)
-            yaw_rate = (yaw_curr - yaw_prev) / self.dt
 
-            # IMM인 경우 내부 모델들에도 반영
-            if isinstance(self.kf, IMMEstimator):
-                for m in self.kf.models:
-                    if isinstance(m, (ExtendedKalmanFilterCTRV6, ExtendedKalmanFilterCTRA6)):
-                        m.x[3,0] = yaw_curr
-                        m.x[4,0] = yaw_rate
-            # pure CTRV6/CTRA6 모드일 때
-            elif isinstance(self.kf, (ExtendedKalmanFilterCTRV6, ExtendedKalmanFilterCTRA6)):
-                self.kf.x[3,0] = yaw_curr
-                self.kf.x[4,0] = yaw_rate
+        # 2) CTRV용 yaw/yaw_rate 단 한 번만 초기화
+        if (not self._init_ctrv
+            and isinstance(self.kf, (ExtendedKalmanFilterCTRV6, ExtendedKalmanFilterCTRA6))
+            and len(self.history) >= 2):
+            # 첫 두 점으로 yaw 초기화
+            x0,y0 = self.history[-2]
+            x1,y1 = self.history[-1]
+            yaw = np.arctan2(y1-y0, x1-x0)
+            self.kf.x[3,0] = yaw
+            self.kf.x[4,0] = 0.0
+            self._init_ctrv = True
 
         # 3) 예측·업데이트
         self.kf.predict()

@@ -11,8 +11,8 @@ from tracker import predict_future_tracks
 
 def visualize_with_matplotlib():
     # ─── 하드코딩된 입력 데이터 & 설정 ───
-    frames = frames_ctrv_dt
-    filter_type = 'CTRV6'   # 'CV6', 'CA6', 'CTRV6', 'CTRA6'
+    frames = frames_spiral
+    filter_type = 'IMM'   # 'CV6', 'CA6', 'CTRV6', 'CTRA6', 'IMM'
 
     # Tracker 초기화
     tracker = MultiObjectTracker(
@@ -66,7 +66,6 @@ def visualize_with_matplotlib():
         track_objs = tracker.tracks
         tracks = tracker.get_tracks()
 
-
         # 추가: 과거 히스토리 점 그리기
         for trk in track_objs:
             hist = getattr(trk, 'history', [])
@@ -85,7 +84,8 @@ def visualize_with_matplotlib():
         det_scatter.set_offsets(det_array)
 
         # 트랙 점 업데이트
-        trk_pts = [[tr['px'], tr['py']] for tr in tracks]
+        trk_pts = [[tr['px'], tr['py']] for tr
+                   in tracks]
         trk_array = make_2d(trk_pts)
         trk_scatter.set_offsets(trk_array)
 
@@ -104,7 +104,6 @@ def visualize_with_matplotlib():
                     linestyle='--',
                     linewidth=1,
                     alpha=0.6)
-
 
         # 속력 텍스트 추가 (ID 아래에 작게)
         for tr, sp in zip(tracks, speeds):
@@ -128,14 +127,11 @@ def visualize_with_matplotlib():
 
         ax.set_title(f"Frame {frame_idx}")
 
-        # if frame_idx == len(frames) - 1:
-        #     plt.close(fig)
-
         return det_scatter, trk_scatter, *txts
 
     ani = animation.FuncAnimation(
         fig, update, frames=len(frames),
-        init_func=init, interval=1000, blit=False, repeat=False
+        init_func=init, interval=100, blit=False, repeat=False
     )
 
     plt.show()

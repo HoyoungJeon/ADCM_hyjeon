@@ -76,72 +76,194 @@ class KalmanFilterCA6:
         return self.x.copy()
 
 class ExtendedKalmanFilterCTRV6:
-    """Constant Turn Rate & Velocity in Cartesian accel form"""
+    """
+    6D EKF for Constant Turn-Rate & Velocity + yaw acceleration:
+      state x = [px, py, v, yaw, yaw_rate, yaw_acc]^T
+      meas  z = [px, py]^T
+    """
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
-        # measurement matrix
-        self.H = np.zeros((2,6)); self.H[0,0]=1; self.H[1,1]=1
-        self.Q = q_var * np.eye(6)
-        self.R = r_var * np.eye(2)
-        # state: [px,py,vx,vy,ax,ay]
+
+        # state: px, py, v, yaw, yaw_rate, yaw_acc
         self.x = np.zeros((6,1))
         self.P = np.eye(6)
 
+        # process noise & measurement noise
+        self.Q = q_var * np.eye(6)
+        self.R = r_var * np.eye(2)
+
+        # measurement matrix: we only observe px, py
+        self.H = np.zeros((2,6))
+        self.H[0,0] = 1
+        self.H[1,1] = 1
+
     def predict(self):
-        # px,py updated by vx,vy
-        self.x[0,0] += self.x[2,0] * self.dt
-        self.x[1,0] += self.x[3,0] * self.dt
-        # vx,vy updated by ax,ay
-        self.x[2,0] += self.x[4,0] * self.dt
-        self.x[3,0] += self.x[5,0] * self.dt
-        # ax,ay remain
+        px, py, v, yaw, yaw_rate, yaw_acc = self.x.flatten()
+        dt = self.dt
+
+        # 1) non-linear state transition
+        if abs(yaw_rate) > 1e-5:
+            px_pred = px + (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            py_pred = py + (v/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
+        else:
+            # straight motion if yaw_rate ~ 0
+            px_pred = px + v * np.cos(yaw) * dt
+            py_pred = py + v * np.sin(yaw) * dt
+
+        v_pred        = v
+        yaw_pred      = yaw + yaw_rate*dt + 0.5*yaw_acc*dt*dt
+        yaw_rate_pred = yaw_rate + yaw_acc*dt
+        yaw_acc_pred  = yaw_acc
+
+        self.x = np.array([
+            [px_pred],
+            [py_pred],
+            [v_pred],
+            [yaw_pred],
+            [yaw_rate_pred],
+            [yaw_acc_pred]
+        ])
+
+        # 2) compute Jacobian F (6×6)
         F = np.eye(6)
-        # fill linearized jacobian manually
-        F[0,2] = self.dt; F[1,3] = self.dt
-        F[2,4] = self.dt; F[3,5] = self.dt
+        # derivatives w.r.t. v, yaw, yaw_rate, yaw_acc
+        if abs(yaw_rate) > 1e-5:
+            F[0,2] = (1/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            F[1,2] = (1/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
+
+            F[0,3] = (v/yaw_rate)*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw))
+            F[1,3] = (v/yaw_rate)*( np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+
+            F[0,4] = (v/(yaw_rate**2))*( np.sin(yaw) - np.sin(yaw + yaw_rate*dt) ) \
+                     + (v*dt/yaw_rate)*np.cos(yaw + yaw_rate*dt)
+            F[1,4] = (v/(yaw_rate**2))*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw) ) \
+                     + (v*dt/yaw_rate)*np.sin(yaw + yaw_rate*dt)
+        else:
+            F[0,2] = np.cos(yaw)*dt
+            F[1,2] = np.sin(yaw)*dt
+            F[0,3] = -v*np.sin(yaw)*dt
+            F[1,3] =  v*np.cos(yaw)*dt
+
+        # yaw, yaw_rate, yaw_acc coupling
+        F[3,4] = dt
+        F[3,5] = 0.5 * dt * dt
+        F[4,5] = dt
+
+        # 3) covariance predict
         self.P = F @ self.P @ F.T + self.Q
+
         return self.x.copy()
 
     def update(self, z):
+        """
+        z: [px, py] measurement
+        """
         z = np.array(z).reshape(2,1)
+
+        # innovation
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
-        self.x = self.x + K @ y
-        self.P = (np.eye(6) - K @ self.H) @ self.P
+
+        # state update
+        self.x = self.x + (K @ y)
+        # covariance update
+        I = np.eye(6)
+        self.P = (I - K @ self.H) @ self.P
+
         return self.x.copy()
+
+
 
 class ExtendedKalmanFilterCTRA6:
-    """Constant Turn Rate & Acceleration in Cartesian accel form"""
+    """
+    6D EKF for Constant Turn Rate & Acceleration:
+      state x = [px, py, v, yaw, yaw_rate, a]^T
+      meas  z = [px, py]^T
+    """
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
-        self.H = np.zeros((2,6)); self.H[0,0]=1; self.H[1,1]=1
-        self.Q = q_var * np.eye(6)
-        self.R = r_var * np.eye(2)
+
+        # state: px, py, v, yaw, yaw_rate, a
         self.x = np.zeros((6,1))
         self.P = np.eye(6)
 
+        # process & measurement noise
+        self.Q = q_var * np.eye(6)
+        self.R = r_var * np.eye(2)
+
+        # measurement matrix: only px, py observed
+        self.H = np.zeros((2,6))
+        self.H[0,0] = 1
+        self.H[1,1] = 1
+
     def predict(self):
-        # px,py
-        self.x[0,0] += self.x[2,0] * self.dt
-        self.x[1,0] += self.x[3,0] * self.dt
-        # vx,vy updated by ax,ay
-        self.x[2,0] += self.x[4,0] * self.dt
-        self.x[3,0] += self.x[5,0] * self.dt
-        # ax,ay remain (constant)
+        px, py, v, yaw, yaw_rate, a = self.x.flatten()
+        dt = self.dt
+
+        # 1) non-linear CTRV + acceleration model
+        if abs(yaw_rate) > 1e-5:
+            px_pred = px + (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            py_pred = py + (v/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
+        else:
+            # straight motion fallback
+            px_pred = px + v * np.cos(yaw) * dt
+            py_pred = py + v * np.sin(yaw) * dt
+
+        v_pred        = v + a * dt
+        yaw_pred      = yaw + yaw_rate * dt
+        yaw_rate_pred = yaw_rate
+        a_pred        = a
+
+        self.x = np.array([
+            [px_pred],
+            [py_pred],
+            [v_pred],
+            [yaw_pred],
+            [yaw_rate_pred],
+            [a_pred]
+        ])
+
+        # 2) Jacobian F (6×6)
         F = np.eye(6)
-        F[0,2] = self.dt; F[1,3] = self.dt
-        F[2,4] = self.dt; F[3,5] = self.dt
+        if abs(yaw_rate) > 1e-5:
+            F[0,2] = (1/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            F[1,2] = (1/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
+            F[0,3] = (v/yaw_rate)*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw))
+            F[1,3] = (v/yaw_rate)*( np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            F[0,4] = (v/(yaw_rate**2))*( np.sin(yaw) - np.sin(yaw + yaw_rate*dt) ) \
+                     + (v*dt/yaw_rate)*np.cos(yaw + yaw_rate*dt)
+            F[1,4] = (v/(yaw_rate**2))*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw) ) \
+                     + (v*dt/yaw_rate)*np.sin(yaw + yaw_rate*dt)
+        else:
+            F[0,2] = np.cos(yaw) * dt
+            F[1,2] = np.sin(yaw) * dt
+            F[0,3] = -v * np.sin(yaw) * dt
+            F[1,3] =  v * np.cos(yaw) * dt
+
+        # a → v coupling
+        F[2,5] = dt
+        # yaw_rate → yaw coupling
+        F[3,4] = dt
+
+        # 3) covariance predict
         self.P = F @ self.P @ F.T + self.Q
+
         return self.x.copy()
 
     def update(self, z):
+        """
+        z: [px, py] measurement
+        """
         z = np.array(z).reshape(2,1)
+        # innovation
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
+        # state & covariance update
         self.x = self.x + K @ y
         self.P = (np.eye(6) - K @ self.H) @ self.P
+
         return self.x.copy()
 
 

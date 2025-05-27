@@ -10,7 +10,7 @@ if __name__ == '__main__':
         dt=0.1, q_var=0.1, r_var=0.01, # q_var: Process Noise Variance, r_var: Measurement Noise Variance
         max_skipped=3, dist_threshold=10, init_frames=3
     )
-    frames = frames_ctrv_dt
+    frames = frames_spiral
 
     model_names = ['CV6', 'CA6', 'CTRV6', 'CTRA6']
 
