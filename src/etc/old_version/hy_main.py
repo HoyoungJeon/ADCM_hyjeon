@@ -7,7 +7,7 @@ from threading import Thread
 from agent import init_agents  # 에이전트 모듈 임포트
 
 # ------------------------------------------------------------------
-# Headless 모드: pygame 관련 코드만 제거한 main.py
+# Headless 모드: pygame 관련 코드만 제거한 main_4KF.py
 # ------------------------------------------------------------------
 
 # 시뮬레이션 및 맵 설정

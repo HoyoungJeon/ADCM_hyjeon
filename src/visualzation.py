@@ -1,32 +1,22 @@
-# Visualzation.py
+# visualzation.py
 
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from tracker import MultiObjectTracker
+from kalman_filters import IMMEstimator
+from frames_data import *
+
 
 def visualize_with_matplotlib():
     # ─── 하드코딩된 입력 데이터 & 설정 ───
-    frames = [
-        [[0.0, 0.0], [5.0, 0.0]],
-        [[1.0, 0.5], [5.0, 1.0]],
-        [[2.0, 1.0], [5.0, 2.0]],
-        [[3.0, 1.5], [2.0, 5.0], [5.0, 3.0]],
-        [[4.0, 2.0], [3.0, 5.0], [5.0, 4.0]],
-        [[5.0, 2.5], [4.0, 5.0], [5.0, 5.0]],
-        [[6.0, 3.0], [5.0, 5.0]],
-        [[7.0, 3.5], [6.0, 5.0]],
-        [[8.0, 4.0], [7.0, 5.0]],
-        [[9.0, 4.5]],
-        [[10.0, 5.0]],
-        []
-    ]
+    frames = frames_ctrv_dt
     filter_type = 'CTRV6'   # 'CV6', 'CA6', 'CTRV6', 'CTRA6'
 
     # Tracker 초기화
     tracker = MultiObjectTracker(
         filter_type=filter_type,
-        dt=1.0, q_var=1.0, r_var=1.0,
+        dt=0.1, q_var=0.1, r_var=0.01, # q_var: Process Noise Variance, r_var: Measurement Noise Variance
         max_skipped=3, dist_threshold=10.0, init_frames=3
     )
 
@@ -34,11 +24,13 @@ def visualize_with_matplotlib():
     all_pts = [pt for f in frames for pt in f]
     max_x = max((p[0] for p in all_pts), default=0) + 10
     max_y = max((p[1] for p in all_pts), default=0) + 10
+    min_x = min((p[0] for p in all_pts), default=0) - 10
+    min_y = min((p[1] for p in all_pts), default=0) - 10
 
     # ─── Matplotlib 셋업 ───
-    fig, ax = plt.subplots()
-    ax.set_xlim(-3, max_x)
-    ax.set_ylim(-3, max_y)
+    fig, ax = plt.subplots(figsize=(14, 8))
+    ax.set_xlim(min_x, max_x)
+    ax.set_ylim(min_y, max_y)
     ax.set_aspect('equal', 'box')
     ax.grid(True)
 
@@ -72,6 +64,10 @@ def visualize_with_matplotlib():
         tracker.update(frames[frame_idx])
         tracks = tracker.get_tracks()
 
+
+        # 속력 계산 (vx, vy는 트랙 상태에 포함되어 있다고 가정)
+        speeds = [(tr['vx'] ** 2 + tr['vy'] ** 2) ** 0.5 for tr in tracks]
+
         # 검출점 업데이트
         det_array = make_2d(frames[frame_idx])
         det_scatter.set_offsets(det_array)
@@ -80,6 +76,17 @@ def visualize_with_matplotlib():
         trk_pts = [[tr['px'], tr['py']] for tr in tracks]
         trk_array = make_2d(trk_pts)
         trk_scatter.set_offsets(trk_array)
+
+        # 속력 텍스트 추가 (ID 아래에 작게)
+        for tr, sp in zip(tracks, speeds):
+            t = ax.text(
+                tr['px'], tr['py'] - 0.2,  # ID 바로 아래 위치
+                f"{sp:.1f}",  # 소수점 한 자리 속력
+                fontsize=8, color='yellow',
+                ha='center', va='top',
+                bbox=dict(facecolor='black', alpha=0.5, pad=1)
+            )
+            txts.append(t)
 
         # ID 텍스트 추가
         for tr in tracks:
@@ -91,6 +98,10 @@ def visualize_with_matplotlib():
             txts.append(t)
 
         ax.set_title(f"Frame {frame_idx}")
+
+        if frame_idx == len(frames) - 1:
+            plt.close(fig)
+
         return det_scatter, trk_scatter, *txts
 
     ani = animation.FuncAnimation(
