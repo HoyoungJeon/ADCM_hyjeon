@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from tracker import MultiObjectTracker
+from tracker import MultiObjectTracker, predict_future_tracks
 from frames_data import *
 
 if __name__ == '__main__':
@@ -42,3 +42,11 @@ if __name__ == '__main__':
                                  for name, p in zip(model_names, probs)]
                     line += "  [" + ", ".join(prob_strs) + "]"
                 print(line)
+
+            future_preds = predict_future_tracks(tracker, steps=5)
+            for tid, path in future_preds.items():
+                print(f"\n--- Track {tid} 5-frame Prediction ---")
+                for i, (px, py) in enumerate(path, start=1):
+                    print(f" +{i}: px={px:.2f}, py={py:.2f}")
+
+

@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 from kalman_filters import *
-
+import copy
 
 class Track:
     """Single-object track using one of the 6D Kalman filters."""
@@ -190,3 +190,37 @@ class MultiObjectTracker:
                 'skipped_frames': t.skipped_frames,
             })
         return out
+
+def predict_future_tracks(tracker, steps=5):
+    """
+    Predict the next `steps` frames for each confirmed track in the tracker.
+    Returns a dict mapping track_id to a list of (px, py) predictions.
+    """
+    predictions = {}
+    for trk in tracker.tracks:  # Track 객체 리스트 :contentReference[oaicite:0]{index=0}
+        track_id = trk.track_id
+        # IMMEstimator 인스턴스인지 확인 :contentReference[oaicite:1]{index=1}
+        if hasattr(trk.kf, 'models'):
+            # 내부 모델들과 확률 μ 복제
+            models = [copy.deepcopy(m) for m in trk.kf.models]
+            mu = trk.kf.mu.copy()
+            traj = []
+            for _ in range(steps):
+                # 각 모델 predict 호출
+                for m in models:
+                    m.predict()
+                # 모델별 상태 weighted sum
+                x_comb = sum(mu[i] * models[i].x for i in range(len(models)))
+                traj.append((float(x_comb[0]), float(x_comb[1])))
+            predictions[track_id] = traj
+        else:
+            # 단일 칼만필터 복제 후 predict
+            kf_copy = copy.deepcopy(trk.kf)
+            traj = []
+            for _ in range(steps):
+                kf_copy.predict()
+                x = kf_copy.x
+                traj.append((float(x[0]), float(x[1])))
+            predictions[track_id] = traj
+
+    return predictions
