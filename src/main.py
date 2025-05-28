@@ -4,15 +4,15 @@ from tracker import MultiObjectTracker, predict_future_tracks
 from frames_data import *
 
 if __name__ == '__main__':
-    filter_type = 'IMM'  # 'CV6', 'CA6', 'CTRV6', 'CTRA6', 'IMM'
+    filter_type = 'IMM'  # 'CV6', 'CA6', 'VariableTurnEKF', 'FixedTurnEKF', 'IMM'
     tracker = MultiObjectTracker(
         filter_type=filter_type,
         dt=0.1, q_var=0.1, r_var=0.01, # q_var: Process Noise Variance, r_var: Measurement Noise Variance
         max_skipped=3, dist_threshold=10, init_frames=3
     )
-    frames = frames_spiral
+    frames = generate_ctrv()
 
-    model_names = ['CV6', 'CA6', 'CTRV6', 'CTRA6']
+    model_names = ['CV6', 'CA6', 'VariableTurnEKF', 'FixedTurnEKF']
 
     for idx, dets in enumerate(frames):
         print(f"\n--- Frame {idx} ---")

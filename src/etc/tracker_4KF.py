@@ -14,7 +14,7 @@ class Track:
         elif filter_type == 'CA6':
             self.kf = KalmanFilterCA6(dt, q_var, r_var)
         elif filter_type == 'CTRV6':
-            self.kf = ExtendedKalmanFilterCTRV6(dt, q_var, r_var)
+            self.kf = VariableTurnEKF(dt, q_var, r_var)
         elif filter_type == 'CTRA6':
             self.kf = ExtendedKalmanFilterCTRA6(dt, q_var, r_var)
         elif filter_type == 'IMM':
@@ -23,7 +23,7 @@ class Track:
             models = [
                 KalmanFilterCV6(dt, q_var, r_var),
                 KalmanFilterCA6(dt, q_var, r_var),
-                ExtendedKalmanFilterCTRV6(dt, q_var, r_var),
+                VariableTurnEKF(dt, q_var, r_var),
                 ExtendedKalmanFilterCTRA6(dt, q_var, r_var),
             ]
             self.kf = IMMEstimator(models)

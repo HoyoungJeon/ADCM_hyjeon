@@ -13,18 +13,18 @@ class Track:
             self.kf = KalmanFilterCV6(dt, q_var, r_var)
         elif filter_type == 'CA6':
             self.kf = KalmanFilterCA6(dt, q_var, r_var)
-        elif filter_type == 'CTRV6':
-            self.kf = ExtendedKalmanFilterCTRV6(dt, q_var, r_var)
-        elif filter_type == 'CTRA6':
-            self.kf = ExtendedKalmanFilterCTRA6(dt, q_var, r_var)
+        elif filter_type == 'VariableTurnEKF':
+            self.kf = VariableTurnEKF(dt, q_var, r_var)
+        elif filter_type == 'FixedTurnEKF':
+            self.kf = FixedTurnEKF(dt, q_var, r_var)
         elif filter_type == 'IMM':
-            # IMM: 4가지 모델(CV6, CA6, CTRV6, CTRA6) 사용
+            # IMM: 4가지 모델(CV6, CA6, VariableTurnEKF, VariableTurnEKF, FixedTurnEKF) 사용
             from kalman_filters import IMMEstimator
             models = [
                 KalmanFilterCV6(dt, q_var, r_var),
                 KalmanFilterCA6(dt, q_var, r_var),
-                ExtendedKalmanFilterCTRV6(dt, q_var, r_var),
-                ExtendedKalmanFilterCTRA6(dt, q_var, r_var),
+                VariableTurnEKF(dt, q_var, r_var),
+                FixedTurnEKF(dt, q_var, r_var)
             ]
 
 
@@ -58,7 +58,7 @@ class Track:
 
         # 2) CTRV용 yaw/yaw_rate 단 한 번만 초기화
         if (not self._init_ctrv
-            and isinstance(self.kf, (ExtendedKalmanFilterCTRV6, ExtendedKalmanFilterCTRA6))
+            and isinstance(self.kf, (VariableTurnEKF, FixedTurnEKF))
             and len(self.history) >= 2):
             # 첫 두 점으로 yaw 초기화
             x0,y0 = self.history[-2]

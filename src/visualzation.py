@@ -11,8 +11,8 @@ from tracker import predict_future_tracks
 
 def visualize_with_matplotlib():
     # ─── 하드코딩된 입력 데이터 & 설정 ───
-    frames = frames_spiral
-    filter_type = 'IMM'   # 'CV6', 'CA6', 'CTRV6', 'CTRA6', 'IMM'
+    frames = generate_ctrv()
+    filter_type = 'IMM'   # 'CV6', 'CA6', 'VariableTurnEKF', 'FixedTurnEKF', 'IMM'
 
     # Tracker 초기화
     tracker = MultiObjectTracker(

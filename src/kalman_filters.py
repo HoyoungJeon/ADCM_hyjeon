@@ -75,11 +75,13 @@ class KalmanFilterCA6:
         self.P = (np.eye(6) - K @ self.H) @ self.P
         return self.x.copy()
 
-class ExtendedKalmanFilterCTRV6:
+class VariableTurnEKF:
     """
-    6D EKF for Constant Turn-Rate & Velocity + yaw acceleration:
+    6D EKF for motion with **variable turn rate** (yaw_rate driven by yaw_acc):
       state x = [px, py, v, yaw, yaw_rate, yaw_acc]^T
       meas  z = [px, py]^T
+
+    This model allows the turn rate (yaw_rate) to evolve over time via yaw_acc.
     """
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
@@ -173,47 +175,44 @@ class ExtendedKalmanFilterCTRV6:
 
         return self.x.copy()
 
-
-
-class ExtendedKalmanFilterCTRA6:
+class FixedTurnEKF:
     """
-    6D EKF for Constant Turn Rate & Acceleration:
-      state x = [px, py, v, yaw, yaw_rate, a]^T
+    6D EKF for pure Constant Turn-Rate & Velocity (CTRV) model:
+      state x = [px, py, v, yaw, yaw_rate, yaw_acc]^T
       meas  z = [px, py]^T
+
+    This model assumes a constant turn rate (yaw_rate) over time.
+    yaw_acc is carried only for IMM state‐dimension consistency and not used in prediction.
     """
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
-
-        # state: px, py, v, yaw, yaw_rate, a
+        # state and covariance
         self.x = np.zeros((6,1))
         self.P = np.eye(6)
-
         # process & measurement noise
         self.Q = q_var * np.eye(6)
         self.R = r_var * np.eye(2)
-
         # measurement matrix: only px, py observed
         self.H = np.zeros((2,6))
         self.H[0,0] = 1
         self.H[1,1] = 1
 
     def predict(self):
-        px, py, v, yaw, yaw_rate, a = self.x.flatten()
+        px, py, v, yaw, yaw_rate, yaw_acc = self.x.flatten()
         dt = self.dt
 
-        # 1) non-linear CTRV + acceleration model
+        # 1) Nonlinear CTRV prediction
         if abs(yaw_rate) > 1e-5:
             px_pred = px + (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
             py_pred = py + (v/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
         else:
-            # straight motion fallback
             px_pred = px + v * np.cos(yaw) * dt
             py_pred = py + v * np.sin(yaw) * dt
 
-        v_pred        = v + a * dt
-        yaw_pred      = yaw + yaw_rate * dt
-        yaw_rate_pred = yaw_rate
-        a_pred        = a
+        v_pred         = v
+        yaw_pred       = yaw + yaw_rate * dt
+        yaw_rate_pred  = yaw_rate
+        yaw_acc_pred   = yaw_acc  # unchanged
 
         self.x = np.array([
             [px_pred],
@@ -221,7 +220,7 @@ class ExtendedKalmanFilterCTRA6:
             [v_pred],
             [yaw_pred],
             [yaw_rate_pred],
-            [a_pred]
+            [yaw_acc_pred]
         ])
 
         # 2) Jacobian F (6×6)
@@ -229,42 +228,38 @@ class ExtendedKalmanFilterCTRA6:
         if abs(yaw_rate) > 1e-5:
             F[0,2] = (1/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
             F[1,2] = (1/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
-            F[0,3] = (v/yaw_rate)*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw))
-            F[1,3] = (v/yaw_rate)*( np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
-            F[0,4] = (v/(yaw_rate**2))*( np.sin(yaw) - np.sin(yaw + yaw_rate*dt) ) \
+            F[0,3] = (v/yaw_rate)*(np.cos(yaw + yaw_rate*dt) - np.cos(yaw))
+            F[1,3] = (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            F[0,4] = (v/(yaw_rate**2))*(np.sin(yaw) - np.sin(yaw + yaw_rate*dt)) \
                      + (v*dt/yaw_rate)*np.cos(yaw + yaw_rate*dt)
-            F[1,4] = (v/(yaw_rate**2))*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw) ) \
-                     + (v*dt/yaw_rate)*np.sin(yaw + yaw_rate*dt)
+            F[1,4] = (v/(yaw_rate**2))*(np.cos(yaw + yaw_rate*dt) - np.cos(yaw)) \
+                     + (v*dt/yaw_rate)*np.sin(yaw)
         else:
             F[0,2] = np.cos(yaw) * dt
             F[1,2] = np.sin(yaw) * dt
             F[0,3] = -v * np.sin(yaw) * dt
             F[1,3] =  v * np.cos(yaw) * dt
 
-        # a → v coupling
-        F[2,5] = dt
-        # yaw_rate → yaw coupling
+        # yaw ← yaw_rate coupling
         F[3,4] = dt
+        # no coupling to yaw_acc (F[3,5] stays 0)
+        # yaw_rate and yaw_acc states remain constant (diagonals = 1)
 
-        # 3) covariance predict
+        # 3) Covariance predict
         self.P = F @ self.P @ F.T + self.Q
-
         return self.x.copy()
 
     def update(self, z):
-        """
-        z: [px, py] measurement
-        """
         z = np.array(z).reshape(2,1)
         # innovation
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
         # state & covariance update
-        self.x = self.x + K @ y
+        self.x = self.x + (K @ y)
         self.P = (np.eye(6) - K @ self.H) @ self.P
-
         return self.x.copy()
+
 
 
 class IMMEstimator:
