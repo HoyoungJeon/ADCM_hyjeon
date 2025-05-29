@@ -275,7 +275,7 @@ class IMMEstimator:
         self.mu = np.ones(self.M) / self.M
         # 모델 전이확률 행렬: 기본은 자주 바뀌지 않는다고 가정
         if PI is None:
-            p_stay = 0.99
+            p_stay = 0.8
             p_switch = (1 - p_stay) / (self.M - 1)
             self.PI = np.full((self.M, self.M), p_switch)
             np.fill_diagonal(self.PI, p_stay)

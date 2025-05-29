@@ -10,7 +10,7 @@ if __name__ == '__main__':
         dt=0.1, q_var=0.1, r_var=0.01, # q_var: Process Noise Variance, r_var: Measurement Noise Variance
         max_skipped=3, dist_threshold=10, init_frames=3
     )
-    frames = generate_ctrv()
+    frames = mixed_frames
 
     model_names = ['CV6', 'CA6', 'VariableTurnEKF', 'FixedTurnEKF']
 
@@ -44,9 +44,9 @@ if __name__ == '__main__':
                 print(line)
 
             future_preds = predict_future_tracks(tracker, steps=5)
-            for tid, path in future_preds.items():
-                print(f"\n--- Track {tid} 5-frame Prediction ---")
-                for i, (px, py) in enumerate(path, start=1):
-                    print(f" +{i}: px={px:.2f}, py={py:.2f}")
+            # for tid, path in future_preds.items():
+            #     print(f"\n--- Track {tid} 5-frame Prediction ---")
+            #     for i, (px, py) in enumerate(path, start=1):
+            #         print(f" +{i}: px={px:.2f}, py={py:.2f}")
 
 
