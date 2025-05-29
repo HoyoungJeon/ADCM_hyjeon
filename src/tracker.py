@@ -1,220 +1,211 @@
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from kalman_filters import *
+from kalman_filters import (
+    IMMEstimator,
+    KalmanFilterCV6,
+    KalmanFilterCA6,
+    VariableTurnEKF,
+    FixedTurnEKF,
+)
 import copy
-import math
 
 class Track:
-    """Single-object track using one of the 6D Kalman filters."""
-    def __init__(self, detection, track_id,
-                 filter_type='CV6', dt=1.0, q_var=1.0, r_var=1.0):
+    """Single-object track using an IMM of 6D filters."""
+    def __init__(self, detection, track_id, dt=1.0, q_var=1.0, r_var=1.0):
         self.track_id = track_id
         self.skipped_frames = 0
-        if filter_type == 'CV6':
-            self.kf = KalmanFilterCV6(dt, q_var, r_var)
-        elif filter_type == 'CA6':
-            self.kf = KalmanFilterCA6(dt, q_var, r_var)
-        elif filter_type == 'VariableTurnEKF':
-            self.kf = VariableTurnEKF(dt, q_var, r_var)
-        elif filter_type == 'FixedTurnEKF':
-            self.kf = FixedTurnEKF(dt, q_var, r_var)
-        elif filter_type == 'IMM':
-            # IMM: 4가지 모델(CV6, CA6, VariableTurnEKF, VariableTurnEKF, FixedTurnEKF) 사용
-            from kalman_filters import IMMEstimator
-            models = [
-                KalmanFilterCV6(dt, q_var, r_var),
-                KalmanFilterCA6(dt, q_var, r_var),
-                VariableTurnEKF(dt, q_var, r_var),
-                FixedTurnEKF(dt, q_var, r_var)
-            ]
 
+        # Create the IMM over the four models
+        models = [
+            KalmanFilterCV6(dt, q_var, r_var),
+            KalmanFilterCA6(dt, q_var, r_var),
+            VariableTurnEKF(dt, q_var, r_var),
+            FixedTurnEKF(dt, q_var, r_var),
+        ]
+        self.kf = IMMEstimator(models)
 
-            self.kf = IMMEstimator(models)
-        else:
-            raise ValueError(f"Unknown filter_type: {filter_type}")
-        self.kf.x[0,0], self.kf.x[1,0] = detection
-        if filter_type == 'IMM':
-            for m in self.kf.models:
-                m.x[0,0], m.x[1,0] = detection
+        # Initialize all sub-models' position to the first detection
+        for m in self.kf.models:
+            m.x[0, 0], m.x[1, 0] = detection
 
+        # Keep history of raw detections for yaw initialization
         self.history = [detection]
         self.dt = dt
         self._init_ctrv = False
 
     def predict(self):
+        """Run one-step IMM predict and return the combined state."""
         self.kf.predict()
         return self.kf.x.flatten()
 
     def update(self, detection):
-        # self.kf.update(detection)
-        #
-        #
-        # self.kf.predict()
-        # self.skipped_frames = 0
-
-
-        # 1) 히스토리 추가
+        """Incorporate a new detection into the track (IMM predict+update)."""
+        # 1) Append new measurement to history
         self.history.append(detection)
 
-
-        # 2) CTRV용 yaw/yaw_rate 단 한 번만 초기화
-        if (not self._init_ctrv
-            and isinstance(self.kf, (VariableTurnEKF, FixedTurnEKF))
-            and len(self.history) >= 2):
-            # 첫 두 점으로 yaw 초기화
-            x0,y0 = self.history[-2]
-            x1,y1 = self.history[-1]
-            yaw = np.arctan2(y1-y0, x1-x0)
-            self.kf.x[3,0] = yaw
-            self.kf.x[4,0] = 0.0
+        # 2) Once, initialize yaw & yaw_rate for all CTRV/EKF submodels
+        if not self._init_ctrv and len(self.history) >= 2:
+            x0, y0 = self.history[-2]
+            x1, y1 = self.history[-1]
+            yaw = np.arctan2(y1 - y0, x1 - x0)
+            for m in self.kf.models:
+                if isinstance(m, (VariableTurnEKF, FixedTurnEKF)):
+                    m.x[3, 0] = yaw
+                    m.x[4, 0] = 0.0
             self._init_ctrv = True
 
-        # 3) 예측·업데이트
+        # 3) IMM predict and update
         self.kf.predict()
         self.kf.update(detection)
         self.skipped_frames = 0
 
     def get_state(self):
+        """Return the current combined state vector [px, py, vx, vy, ax, ay]."""
         return self.kf.x.flatten()
+
 
 class MultiObjectTracker:
     """
-    Multi-object tracker with 6D KF-based Track.
-    - init_frames 번 연속 검출되어야 트랙으로 확정.
-    - max_skipped 초과하면 트랙 제거.
+    Multi-object tracker using IMM-based 6D tracks.
+
+    - A detection must appear in `init_frames` consecutive frames to confirm a track.
+    - Tracks are removed after exceeding `max_skipped` consecutive missed detections.
     """
-    def __init__(self,
-                 filter_type='CV6', dt=1.0, q_var=1.0, r_var=1.0,
-                 max_skipped=5, dist_threshold=10.0, init_frames=3):
-        self.filter_type = filter_type
-        self.dt, self.q_var, self.r_var = dt, q_var, r_var
+    def __init__(
+        self,
+        dt=1.0,
+        q_var=1.0,
+        r_var=1.0,
+        max_skipped=5,
+        dist_threshold=10.0,
+        init_frames=3
+    ):
+        self.dt = dt
+        self.q_var = q_var
+        self.r_var = r_var
         self.max_skipped = max_skipped
         self.dist_threshold = dist_threshold
         self.init_frames = init_frames
 
         self.tracks = []
         self.next_id = 0
-        self.pending = []  # [{'detection': [x,y], 'count': n}, ...]
+        self.pending = []  # list of {'detection': [x,y], 'count': n}
 
     def associate(self, detections):
+        """Compute assignment between existing tracks and new detections."""
         N, M = len(self.tracks), len(detections)
         if N == 0:
             return [], list(range(M)), []
+
         cost = np.zeros((N, M))
         for i, trk in enumerate(self.tracks):
             pred = trk.predict()
             for j, d in enumerate(detections):
                 cost[i, j] = np.linalg.norm(pred[:2] - d)
+
         row, col = linear_sum_assignment(cost)
         matched, un_dets, un_trks = [], [], []
+
         for i, j in zip(row, col):
             if cost[i, j] > self.dist_threshold:
-                un_trks.append(i); un_dets.append(j)
+                un_trks.append(i)
+                un_dets.append(j)
             else:
                 matched.append((i, j))
+
         un_trks += [i for i in range(N) if i not in row]
         un_dets += [j for j in range(M) if j not in col]
         return matched, un_dets, un_trks
 
     def update(self, detections):
-        # 1) Associate and update confirmed tracks
+        """
+        1) Associate and update confirmed tracks;
+        2) Age and prune stale tracks;
+        3) Build pending detections to confirm new tracks.
+        """
         matched, un_dets, un_trks = self.associate(detections)
+
+        # Update matched tracks
         for trk_idx, det_idx in matched:
             self.tracks[trk_idx].update(detections[det_idx])
 
-        # 2) Increment skip for unmatched confirmed tracks and remove stale
+        # Age unmatched tracks and remove those too old
         for idx in un_trks:
             self.tracks[idx].skipped_frames += 1
-        self.tracks = [t for t in self.tracks if t.skipped_frames <= self.max_skipped]
+        self.tracks = [
+            t for t in self.tracks
+            if t.skipped_frames <= self.max_skipped
+        ]
 
-        # 3) Pending detection logic (always active)
+        # Handle pending detections
         new_pending = []
         for pen in self.pending:
-            # 아직 매칭되지 않은 검출들에 대해 (인덱스, 거리) 쌍을 계산
+            # Find closest unmatched detection
             dists = [
                 (j, np.linalg.norm(np.array(detections[j]) - pen['detection']))
                 for j in un_dets
             ]
-            # 거리 최소값을 찾고, 그 값이 문턱 이하일 때만 매칭
             if dists:
                 j_min, min_dist = min(dists, key=lambda x: x[1])
                 if min_dist <= self.dist_threshold:
-                    matched_det_idx = j_min
-                else:
-                    matched_det_idx = None
-            else:
-                matched_det_idx = None
-
-            if matched_det_idx is not None:
-                pen['detection'] = detections[matched_det_idx]
-                pen['count'] += 1
-                if pen['count'] >= self.init_frames:
-                    # Confirm and create new track
-                    self.tracks.append(
-                        Track(
-                            pen['detection'], self.next_id,
-                            filter_type=self.filter_type,
-                            dt=self.dt, q_var=self.q_var, r_var=self.r_var
+                    pen['detection'] = detections[j_min]
+                    pen['count'] += 1
+                    if pen['count'] >= self.init_frames:
+                        # Confirm a new track
+                        self.tracks.append(
+                            Track(pen['detection'], self.next_id,
+                                  dt=self.dt, q_var=self.q_var, r_var=self.r_var)
                         )
-                    )
-                    self.next_id += 1
-
+                        self.next_id += 1
+                    else:
+                        new_pending.append(pen)
+                    un_dets.remove(j_min)
                 else:
-                    # still need more consecutive frames, keep in pending
-                    new_pending.append(pen)
-                if matched_det_idx in un_dets:
-                    un_dets.remove(matched_det_idx)
+                    # Detection moved too far: keep pending but reset count
+                    new_pending.append({'detection': pen['detection'], 'count': 1})
             else:
-                # no match this frame, reset or keep based on policy
-                new_pending.append(pen)
+                # No candidate this frame: keep pending with count reset
+                new_pending.append({'detection': pen['detection'], 'count': 1})
 
-        # Add any remaining unmatched detections as new pending
+        # Any remaining unmatched detections start as pending
         for idx in un_dets:
             new_pending.append({'detection': detections[idx], 'count': 1})
+
         self.pending = new_pending
 
     def get_tracks(self):
-        out = []
+        """Return a list of dicts with each track’s current state and metadata."""
+        output = []
         for t in self.tracks:
             px, py, vx, vy, ax, ay = t.get_state()
-            out.append({
+            output.append({
                 'id': t.track_id,
                 'px': float(px), 'py': float(py),
                 'vx': float(vx), 'vy': float(vy),
                 'ax': float(ax), 'ay': float(ay),
                 'skipped_frames': t.skipped_frames,
             })
-        return out
+        return output
+
 
 def predict_future_tracks(tracker, steps=5):
-    # Best model selection
     """
-    For each track, pick the single IMM sub‐model with highest μ (or the sole filter if non‐IMM),
-    deep‐copy it, and run N‐step predictions.
-    Returns a dict mapping track_id to a list of (px, py) predictions.
+    Predict the next `steps` frames for each confirmed track using
+    the single IMM sub-model with the highest probability.
+    Returns a dict mapping track_id to a list of (px, py) tuples.
     """
     predictions = {}
-
     for trk in tracker.tracks:
-        track_id = trk.track_id
-        kf = trk.kf
+        # Select the IMM sub-model with the highest weight
+        best_idx = int(np.argmax(trk.kf.mu))
+        model = copy.deepcopy(trk.kf.models[best_idx])
 
-        # 1) If it's an IMM, select the sub‐model with highest μ
-        if isinstance(kf, IMMEstimator):
-            best_idx = int(np.argmax(kf.mu))
-            model = copy.deepcopy(kf.models[best_idx])
-        else:
-            # 2) otherwise just deep‐copy the single filter/ekf
-            model = copy.deepcopy(kf)
-
-        # 3) Run N‐step predict on that model
         traj = []
         for _ in range(steps):
             state = model.predict()
             px, py = float(state[0, 0]), float(state[1, 0])
             traj.append((px, py))
 
-        predictions[track_id] = traj
+        predictions[trk.track_id] = traj
 
     return predictions
-

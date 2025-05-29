@@ -2,7 +2,7 @@ import numpy as np
 from scipy.stats import multivariate_normal
 
 class KalmanFilterCV6:
-    """Constant Velocity: ax=ay=0"""
+    """Constant Velocity model in 6D (ax = ay = 0)."""
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
         # State transition matrix F for CV6
@@ -14,11 +14,11 @@ class KalmanFilterCV6:
             [0, 0, 0,  0, 1, 0],
             [0, 0, 0,  0, 0, 1]
         ])
-        # Measurement matrix: measure px, py
+        # Measurement matrix: we observe px and py
         self.H = np.zeros((2,6))
         self.H[0,0] = 1
         self.H[1,1] = 1
-        # Covariances
+        # Process and measurement noise covariances
         self.Q = q_var * np.eye(6)
         self.R = r_var * np.eye(2)
         # Initial state and covariance
@@ -26,11 +26,13 @@ class KalmanFilterCV6:
         self.P = np.eye(6)
 
     def predict(self):
+        """Predict step: x = F x; P = F P Fᵀ + Q."""
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
         return self.x.copy()
 
     def update(self, z):
+        """Update step with measurement z = [px, py]."""
         z = np.array(z).reshape(2,1)
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
@@ -39,8 +41,9 @@ class KalmanFilterCV6:
         self.P = (np.eye(6) - K @ self.H) @ self.P
         return self.x.copy()
 
+
 class KalmanFilterCA6:
-    """Constant Acceleration: ax, ay included"""
+    """Constant Acceleration model in 6D (ax, ay included)."""
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
         dt2 = 0.5 * dt * dt
@@ -53,20 +56,25 @@ class KalmanFilterCA6:
             [0, 0, 0,  0, 1, 0],
             [0, 0, 0,  0, 0, 1]
         ])
+        # We observe px and py
         self.H = np.zeros((2,6))
         self.H[0,0] = 1
         self.H[1,1] = 1
+        # Noise covariances
         self.Q = q_var * np.eye(6)
         self.R = r_var * np.eye(2)
+        # Initial state and covariance
         self.x = np.zeros((6,1))
         self.P = np.eye(6)
 
     def predict(self):
+        """Predict step: x = F x; P = F P Fᵀ + Q."""
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
         return self.x.copy()
 
     def update(self, z):
+        """Update step with measurement z = [px, py]."""
         z = np.array(z).reshape(2,1)
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
@@ -75,40 +83,39 @@ class KalmanFilterCA6:
         self.P = (np.eye(6) - K @ self.H) @ self.P
         return self.x.copy()
 
+
 class VariableTurnEKF:
     """
-    6D EKF for motion with **variable turn rate** (yaw_rate driven by yaw_acc):
+    Extended Kalman Filter with variable turn-rate (CTRA):
       state x = [px, py, v, yaw, yaw_rate, yaw_acc]^T
-      meas  z = [px, py]^T
+      measurement z = [px, py]^T
 
-    This model allows the turn rate (yaw_rate) to evolve over time via yaw_acc.
+    The turn rate (yaw_rate) is driven by yaw_acc over time.
     """
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
-
-        # state: px, py, v, yaw, yaw_rate, yaw_acc
+        # State and covariance
         self.x = np.zeros((6,1))
         self.P = np.eye(6)
-
-        # process noise & measurement noise
+        # Noise covariances
         self.Q = q_var * np.eye(6)
         self.R = r_var * np.eye(2)
-
-        # measurement matrix: we only observe px, py
+        # We observe px and py
         self.H = np.zeros((2,6))
         self.H[0,0] = 1
         self.H[1,1] = 1
 
     def predict(self):
+        """Nonlinear predict and covariance update."""
         px, py, v, yaw, yaw_rate, yaw_acc = self.x.flatten()
         dt = self.dt
 
-        # 1) non-linear state transition
+        # 1) Nonlinear state propagation
         if abs(yaw_rate) > 1e-5:
             px_pred = px + (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
             py_pred = py + (v/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
         else:
-            # straight motion if yaw_rate ~ 0
+            # Straight-line motion if yaw_rate ≈ 0
             px_pred = px + v * np.cos(yaw) * dt
             py_pred = py + v * np.sin(yaw) * dt
 
@@ -126,82 +133,68 @@ class VariableTurnEKF:
             [yaw_acc_pred]
         ])
 
-        # 2) compute Jacobian F (6×6)
+        # 2) Compute Jacobian F (6×6)
         F = np.eye(6)
-        # derivatives w.r.t. v, yaw, yaw_rate, yaw_acc
         if abs(yaw_rate) > 1e-5:
             F[0,2] = (1/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
             F[1,2] = (1/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
 
-            F[0,3] = (v/yaw_rate)*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw))
-            F[1,3] = (v/yaw_rate)*( np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
+            F[0,3] = (v/yaw_rate)*(np.cos(yaw + yaw_rate*dt) - np.cos(yaw))
+            F[1,3] = (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
 
-            F[0,4] = (v/(yaw_rate**2))*( np.sin(yaw) - np.sin(yaw + yaw_rate*dt) ) \
+            F[0,4] = (v/(yaw_rate**2))*(np.sin(yaw) - np.sin(yaw + yaw_rate*dt)) \
                      + (v*dt/yaw_rate)*np.cos(yaw + yaw_rate*dt)
-            F[1,4] = (v/(yaw_rate**2))*( np.cos(yaw + yaw_rate*dt) - np.cos(yaw) ) \
-                     + (v*dt/yaw_rate)*np.sin(yaw + yaw_rate*dt)
+            F[1,4] = (v/(yaw_rate**2))*(np.cos(yaw + yaw_rate*dt) - np.cos(yaw)) \
+                     + (v*dt/yaw_rate)*np.sin(yaw)
         else:
             F[0,2] = np.cos(yaw)*dt
             F[1,2] = np.sin(yaw)*dt
             F[0,3] = -v*np.sin(yaw)*dt
             F[1,3] =  v*np.cos(yaw)*dt
 
-        # yaw, yaw_rate, yaw_acc coupling
+        # Coupling between yaw, yaw_rate, yaw_acc
         F[3,4] = dt
         F[3,5] = 0.5 * dt * dt
         F[4,5] = dt
 
-        # 3) covariance predict
+        # 3) Covariance predict
         self.P = F @ self.P @ F.T + self.Q
-
         return self.x.copy()
 
     def update(self, z):
-        """
-        z: [px, py] measurement
-        """
+        """EKF update with measurement z = [px, py]."""
         z = np.array(z).reshape(2,1)
-
-        # innovation
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
-
-        # state update
-        self.x = self.x + (K @ y)
-        # covariance update
-        I = np.eye(6)
-        self.P = (I - K @ self.H) @ self.P
-
+        self.x = self.x + K @ y
+        self.P = (np.eye(6) - K @ self.H) @ self.P
         return self.x.copy()
+
 
 class FixedTurnEKF:
     """
-    6D EKF for pure Constant Turn-Rate & Velocity (CTRV) model:
+    Extended Kalman Filter for CTRV (constant turn-rate):
       state x = [px, py, v, yaw, yaw_rate, yaw_acc]^T
-      meas  z = [px, py]^T
+      measurement z = [px, py]^T
 
-    This model assumes a constant turn rate (yaw_rate) over time.
-    yaw_acc is carried only for IMM state‐dimension consistency and not used in prediction.
+    yaw_acc is included for IMM state consistency but is not used in prediction.
     """
     def __init__(self, dt=1.0, q_var=1.0, r_var=1.0):
         self.dt = dt
-        # state and covariance
         self.x = np.zeros((6,1))
         self.P = np.eye(6)
-        # process & measurement noise
         self.Q = q_var * np.eye(6)
         self.R = r_var * np.eye(2)
-        # measurement matrix: only px, py observed
         self.H = np.zeros((2,6))
         self.H[0,0] = 1
         self.H[1,1] = 1
 
     def predict(self):
+        """Nonlinear CTRV predict and covariance update."""
         px, py, v, yaw, yaw_rate, yaw_acc = self.x.flatten()
         dt = self.dt
 
-        # 1) Nonlinear CTRV prediction
         if abs(yaw_rate) > 1e-5:
             px_pred = px + (v/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
             py_pred = py + (v/yaw_rate)*(-np.cos(yaw + yaw_rate*dt) + np.cos(yaw))
@@ -223,7 +216,7 @@ class FixedTurnEKF:
             [yaw_acc_pred]
         ])
 
-        # 2) Jacobian F (6×6)
+        # Compute Jacobian F
         F = np.eye(6)
         if abs(yaw_rate) > 1e-5:
             F[0,2] = (1/yaw_rate)*(np.sin(yaw + yaw_rate*dt) - np.sin(yaw))
@@ -235,45 +228,43 @@ class FixedTurnEKF:
             F[1,4] = (v/(yaw_rate**2))*(np.cos(yaw + yaw_rate*dt) - np.cos(yaw)) \
                      + (v*dt/yaw_rate)*np.sin(yaw)
         else:
-            F[0,2] = np.cos(yaw) * dt
-            F[1,2] = np.sin(yaw) * dt
-            F[0,3] = -v * np.sin(yaw) * dt
-            F[1,3] =  v * np.cos(yaw) * dt
+            F[0,2] = np.cos(yaw)*dt
+            F[1,2] = np.sin(yaw)*dt
+            F[0,3] = -v*np.sin(yaw)*dt
+            F[1,3] =  v*np.cos(yaw)*dt
 
         # yaw ← yaw_rate coupling
         F[3,4] = dt
-        # no coupling to yaw_acc (F[3,5] stays 0)
-        # yaw_rate and yaw_acc states remain constant (diagonals = 1)
+        # no coupling to yaw_acc
 
-        # 3) Covariance predict
+        # Covariance predict
         self.P = F @ self.P @ F.T + self.Q
         return self.x.copy()
 
     def update(self, z):
+        """EKF update with measurement z = [px, py]."""
         z = np.array(z).reshape(2,1)
-        # innovation
         y = z - (self.H @ self.x)
         S = self.H @ self.P @ self.H.T + self.R
         K = self.P @ self.H.T @ np.linalg.inv(S)
-        # state & covariance update
-        self.x = self.x + (K @ y)
+        self.x = self.x + K @ y
         self.P = (np.eye(6) - K @ self.H) @ self.P
         return self.x.copy()
 
 
-
 class IMMEstimator:
     """
-    Interactive Multiple Model estimator combining several 6D Kalman filters.
-    - models: 리스트 of KalmanFilterCV6, KalmanFilterCA6, CTRV6, CTRA6 인스턴스
-    - PI: 모델 전이 확률 행렬 (MxM)
+    Interactive Multiple Model (IMM) estimator combining multiple 6D filters.
+    - models: list of individual Kalman/EKF filter instances
+    - PI: model transition probability matrix (MxM)
     """
     def __init__(self, models, PI=None):
         self.models = models
         self.M = len(models)
-        # 초기 모델 확률: 균등분포
+        # Initial model probabilities: uniform
         self.mu = np.ones(self.M) / self.M
-        # 모델 전이확률 행렬: 기본은 자주 바뀌지 않는다고 가정
+
+        # Transition probability matrix (assume high self-transition by default)
         if PI is None:
             p_stay = 0.8
             p_switch = (1 - p_stay) / (self.M - 1)
@@ -282,70 +273,65 @@ class IMMEstimator:
         else:
             self.PI = PI
 
+        # Initialize combined state and covariance from the first model
         self.x = self.models[0].x.copy()
         self.P = self.models[0].P.copy()
 
-
     def predict(self):
-        # 1) Mixing probabilities
-        c_j = self.PI.T @ self.mu            # 혼합계수 (M,)
-        mu_ij = (self.PI * self.mu.reshape(-1,1)) / c_j.reshape(1,-1)  # (M,M)
+        """IMM predict step: mixing, individual predicts."""
+        # 1) Mixing probabilities c_j and mu_{i→j}
+        c_j = self.PI.T @ self.mu                  # (M,)
+        mu_ij = (self.PI * self.mu.reshape(-1,1)) / c_j.reshape(1,-1)  # (M×M)
 
-        # 2) 혼합 상태(x0)와 혼합 공분산(P0)
-        x0 = []
-        P0 = []
+        # 2) Mixed initial states x0[j] and covariances P0[j]
+        x0, P0 = [], []
         for j in range(self.M):
-            x_mix = np.zeros_like(self.models[0].x)
+            # Mix states
+            x_mix = sum(mu_ij[i,j] * self.models[i].x for i in range(self.M))
+            # Mix covariances
             P_mix = np.zeros_like(self.models[0].P)
             for i in range(self.M):
-                xi = self.models[i].x
-                Pi = self.models[i].P
-                w = mu_ij[i,j]
-                x_mix += w * xi
-            for i in range(self.M):
-                xi = self.models[i].x
-                Pi = self.models[i].P
-                w = mu_ij[i,j]
-                dx = xi - x_mix
-                P_mix += w * (Pi + dx @ dx.T)
+                dx = self.models[i].x - x_mix
+                P_mix += mu_ij[i,j] * (self.models[i].P + dx @ dx.T)
             x0.append(x_mix)
             P0.append(P_mix)
 
-        # 3) 각 모델에 예측 단계 수행 (혼합 초기조건 사용)
+        # 3) Each model uses its mixed initial condition for predict
         for j, model in enumerate(self.models):
             model.x = x0[j].copy()
             model.P = P0[j].copy()
             model.predict()
 
     def update(self, z):
-        # 4) 각 모델 업데이트 및 likelihood 계산
+        """IMM update: individual updates, likelihoods, model probability update, combine."""
+        # 4) Update each model and compute its likelihood
         likelihoods = np.zeros(self.M)
         for j, model in enumerate(self.models):
-            # 예측 잔차
+            # Innovation
             z_pred = model.H @ model.x
             S = model.H @ model.P @ model.H.T + model.R
             y = np.array(z).reshape(-1,1) - z_pred
-            # 다변량 정규분포로 likelihood
+            # Multivariate normal likelihood
             likelihoods[j] = multivariate_normal.pdf(
                 y.flatten(), mean=np.zeros(y.size), cov=S
             )
             model.update(z)
 
-        # 5) 모델 확률 갱신
+        # 5) Update model probabilities
         c = (likelihoods * (self.PI.T @ self.mu)).sum()
         self.mu = (likelihoods * (self.PI.T @ self.mu)) / c
-        # 6) 결합 추정치 (가중합)
-        # 상태
+
+        # 6) Compute combined state x and covariance P
         x_comb = sum(self.mu[j] * self.models[j].x for j in range(self.M))
-        # 공분산
         P_comb = np.zeros_like(self.models[0].P)
         for j in range(self.M):
             dx = self.models[j].x - x_comb
             P_comb += self.mu[j] * (self.models[j].P + dx @ dx.T)
-        # 저장
+
+        # Store combined estimates
         self.x = x_comb
         self.P = P_comb
 
     def get_state(self):
-        # 결합 상태 반환 (flattened)
+        """Return the combined IMM state as a flat array [px,py,v,yaw,yaw_rate,yaw_acc]."""
         return self.x.flatten()
